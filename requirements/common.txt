@@ -1,0 +1,2 @@
+PyYAML==3.12
+toastedmarshmallow==0.2.6
