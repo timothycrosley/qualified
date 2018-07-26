@@ -2,8 +2,11 @@ import yaml
 import json
 import requests
 from collections import namedtuple
+from qualified.types import string_boolean
 
 construct = namedtuple('Construct', ['name', 'compute_quality', 'weight', 'required', 'multiple'])
+validator = namedtuple('Validator', ['construct', 'args', 'kwargs'])
+SUPPORTED_TYPES = {'str': str, 'int': int, 'bool': string_boolean, 'float': float}
 
 
 def read_construct(line):
@@ -46,6 +49,83 @@ def read_construct(line):
     return construct(line[:-index] if index else line, compute_quality, weight, required, multiple)
 
 
+def _read_value(value, supported_types):
+    if ':' in value:
+        value, value_type = value.split(':')
+        if not value_type in supported_types:
+            raise ValueError('provided type of "{}" not one of the support value types: {}'.format
+                                (value_type, ', '.join(supported_types.keys())))
+        return supported_types[value_type](value)
+        
+    return value
+
+
+def read_validator(string, supported_types=SUPPORTED_TYPES):
+    parts = string.split(' ')
+    kind = read_construct(parts.pop(0))
+    
+    args = []
+    kwargs = {}
+    for value in parts:
+        if '=' in value:
+            key, value = value.split('=')
+            value = _read_value(value, supported_types)
+            
+            if key in kwargs:
+                if kwargs[key] != list:
+                    kwargs[key] = [kwargs[key]]
+                kwargs[key].append(value)
+            else:
+                kwargs[key] = value
+        else:
+            args.append(_read_value(value, supported_types))
+    
+    return validator(kind, args, kwargs)
+
+
+def compile_validators(field, validators, supported_types, fail_fast=False):
+    code = ['possible_validator_score = 0',
+            'validator_score = 0']
+    
+    field = read_construct(field)
+    for validator in validators:
+        
+        validator = read_validator(validator, supported_types=supported_types)
+        if validator.construct.weight:
+            code.append('possible_validator_score += {}'.format(validator.construct.weight))
+        code.append('try:')
+        code.append('    value = {}(value, *{}, **{})'.format(validator.construct.name, repr(validator.args),
+                                                              repr(validator.kwargs)))
+        if validator.construct.weight:
+            code.append('    validator_score += {}'.format(validator.construct.weight))
+        code.append('except Exception as e:')
+        if validator.construct.required or field.required:
+            if fail_fast:
+                code.append('    raise e')
+            else:
+                code.append('    errors.append(e)')
+        else:
+            code.append('    pass')
+    return code
+        
+
+def compile_schema(schema, supported_types=SUPPORTED_TYPES):
+    compiled = []
+    for key, validators in schema:
+        key = read_construct(key)
+        if type(validators) == dict:
+            compile_schema(validators)
+        elif type(validators) == str:
+            validators = [validators]
+        
+        
+        for validator in validators:
+            validator = read_validator(validator)
+            compiled.append('try:')
+            compiled.append('    value = {}(input["{}"])')
+            
+                
+            
 class Schema(object):
     
     def __init__(self, definition=None, filename=None, url=None, serializer=json):
@@ -68,8 +148,12 @@ class Schema(object):
 
 
     def compile(self):
-        code = []
+        code = ['score = 0',
+                'possible_score = 0',
+                'output = {}']
+        
         for name, value in self.definition.items():
+                
             required = False
             compute_quality = True
             weight = 1
