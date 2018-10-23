@@ -45,7 +45,7 @@ def read_construct(line):
             break
         else:
             break
-        
+
     return construct(line[:-index] if index else line, compute_quality, weight, required, multiple)
 
 
@@ -56,21 +56,21 @@ def _read_value(value, supported_types):
             raise ValueError('provided type of "{}" not one of the support value types: {}'.format
                                 (value_type, ', '.join(supported_types.keys())))
         return supported_types[value_type](value)
-        
+
     return value
 
 
 def read_validator(string, supported_types=SUPPORTED_TYPES):
     parts = string.split(' ')
     kind = read_construct(parts.pop(0))
-    
+
     args = []
     kwargs = {}
     for value in parts:
         if '=' in value:
             key, value = value.split('=')
             value = _read_value(value, supported_types)
-            
+
             if key in kwargs:
                 if kwargs[key] != list:
                     kwargs[key] = [kwargs[key]]
@@ -79,17 +79,17 @@ def read_validator(string, supported_types=SUPPORTED_TYPES):
                 kwargs[key] = value
         else:
             args.append(_read_value(value, supported_types))
-    
+
     return validator(kind, args, kwargs)
 
 
 def compile_validators(field, validators, supported_types, fail_fast=False):
     code = ['possible_validator_score = 0',
             'validator_score = 0']
-    
+
     field = read_construct(field)
     for validator in validators:
-        
+
         validator = read_validator(validator, supported_types=supported_types)
         if validator.construct.weight:
             code.append('possible_validator_score += {}'.format(validator.construct.weight))
@@ -107,7 +107,7 @@ def compile_validators(field, validators, supported_types, fail_fast=False):
         else:
             code.append('    pass')
     return code
-        
+
 
 def compile_schema(schema, supported_types=SUPPORTED_TYPES):
     compiled = []
@@ -117,60 +117,60 @@ def compile_schema(schema, supported_types=SUPPORTED_TYPES):
             compile_schema(validators)
         elif type(validators) == str:
             validators = [validators]
-        
-        
+
+
         for validator in validators:
             validator = read_validator(validator)
             compiled.append('try:')
             compiled.append('    value = {}(input["{}"])')
-            
-                
-            
+
+
+
 class Schema(object):
-    
+
     def __init__(self, definition=None, filename=None, url=None, serializer=json):
         sources = list(filter(bool, (filename, url,  definition)))
         if not sources:
             raise ValueError("A schema filename, url, or definition must be defined")
         elif len(sources) > 1:
             raise ValueError("You cannot specify multile sources. Choose one: filename, url, or definition.")
-        
+
         if url:
             definition = requests.get(url).content
         elif filename:
             with open(filename) as schema_file:
                 definition = schema_file.read()
-        
+
         self.definition = yaml.load(definition)
         self.name = self.definition.pop('__schema_name__', '')
         self.version = self.definition.pop('__schema_version__', '')
-        
+
 
 
     def compile(self):
         code = ['score = 0',
                 'possible_score = 0',
                 'output = {}']
-        
+
         for name, value in self.definition.items():
-                
+
             required = False
             compute_quality = True
             weight = 1
             name, score = name.split('~')
-            
+
             if '!' in name:
                 name = name.replace('!', '')
                 required = True
             if '?' in name:
                 name = name.replace('?', '')
                 compute_quality = False
-            
-                
-                
-                
-                
-                
+
+
+
+
+
+
             code += 'try:'
             code += '   value = {}(value)'
-        
+
